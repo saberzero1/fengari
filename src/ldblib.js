@@ -468,44 +468,7 @@ const dblib = {
     "upvaluejoin":  db_upvaluejoin
 };
 
-let getinput;
-if (typeof process !== "undefined") { // Only with Node
-    const readlineSync = require('readline-sync');
-    readlineSync.setDefaultOptions({
-        prompt: 'lua_debug> '
-    });
-    getinput = function() {
-        return readlineSync.prompt();
-    };
-} else if (typeof window !== "undefined") {
-    /* if in browser use window.prompt. Doesn't work from web workers.
-       See https://developer.mozilla.org/en-US/docs/Web/API/Window/prompt
-    */
-    getinput = function() {
-        let input = prompt("lua_debug>", "");
-        return (input !== null) ? input : "";
-    };
-}
-if (getinput) {
-    dblib.debug = function(L) {
-        for (;;) {
-            let input = getinput();
-
-            if (input === "cont")
-                return 0;
-
-            if (input.length === 0)
-                continue;
-
-            let buffer = to_luastring(input);
-            if (luaL_loadbuffer(L, buffer, buffer.length, to_luastring("=(debug command)", true))
-                || lua_pcall(L, 0, 0, 0)) {
-                lua_writestringerror(lua_tojsstring(L, -1), "\n");
-            }
-            lua_settop(L, 0);  /* remove eventual returns */
-        }
-    };
-}
+/* debug.debug() is not available in this environment (no interactive I/O) */
 
 const luaopen_debug = function(L) {
     luaL_newlib(L, dblib);

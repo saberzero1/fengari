@@ -20,12 +20,6 @@ const LUA_TABLIBNAME = "table";
 module.exports.LUA_TABLIBNAME = LUA_TABLIBNAME;
 module.exports.luaopen_table = require("./ltablib.js").luaopen_table;
 
-if (typeof process !== "undefined") {
-    const LUA_IOLIBNAME = "io";
-    module.exports.LUA_IOLIBNAME = LUA_IOLIBNAME;
-    module.exports.luaopen_io = require("./liolib.js").luaopen_io;
-}
-
 const LUA_OSLIBNAME = "os";
 module.exports.LUA_OSLIBNAME = LUA_OSLIBNAME;
 module.exports.luaopen_os = require("./loslib.js").luaopen_os;
@@ -49,10 +43,6 @@ module.exports.luaopen_math = require("./lmathlib.js").luaopen_math;
 const LUA_DBLIBNAME = "debug";
 module.exports.LUA_DBLIBNAME = LUA_DBLIBNAME;
 module.exports.luaopen_debug = require("./ldblib.js").luaopen_debug;
-
-const LUA_LOADLIBNAME = "package";
-module.exports.LUA_LOADLIBNAME = LUA_LOADLIBNAME;
-module.exports.luaopen_package = require("./loadlib.js").luaopen_package;
 
 const LUA_FENGARILIBNAME = "fengari";
 module.exports.LUA_FENGARILIBNAME = LUA_FENGARILIBNAME;

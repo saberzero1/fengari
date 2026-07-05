@@ -818,165 +818,15 @@ const skipcomment = function(lf) {
     }
 };
 
-let luaL_loadfilex;
-
-if (typeof process === "undefined") {
-    class LoadF {
-        constructor() {
-            this.n = NaN;  /* number of pre-read characters */
-            this.f = null;  /* file being read */
-            this.buff = new Uint8Array(1024);  /* area for reading file */
-            this.pos = 0;  /* current position in file */
-            this.err = void 0;
-        }
+const luaL_loadfilex = function(L, filename, mode) {
+    let fnameindex = lua_gettop(L) + 1;
+    if (filename === null) {
+        lua_pushliteral(L, "=stdin");
+    } else {
+        lua_pushfstring(L, to_luastring("@%s"), filename);
     }
-
-    const getF = function(L, ud) {
-        let lf = ud;
-
-        if (lf.f !== null && lf.n > 0) {  /* are there pre-read characters to be read? */
-            let bytes = lf.n; /* return them (chars already in buffer) */
-            lf.n = 0;  /* no more pre-read characters */
-            lf.f = lf.f.subarray(lf.pos);  /* we won't use lf.buff anymore */
-            return lf.buff.subarray(0, bytes);
-        }
-
-        let f = lf.f;
-        lf.f = null;
-        return f;
-    };
-
-    getc = function(lf) {
-        return lf.pos < lf.f.length ? lf.f[lf.pos++] : null;
-    };
-
-    luaL_loadfilex = function(L, filename, mode) {
-        let lf = new LoadF();
-        let fnameindex = lua_gettop(L) + 1;  /* index of filename on the stack */
-        if (filename === null) {
-            throw new Error("Can't read stdin in the browser");
-        } else {
-            lua_pushfstring(L, to_luastring("@%s"), filename);
-            let path = to_uristring(filename);
-            let xhr = new XMLHttpRequest();
-            xhr.open("GET", path, false);
-            /*
-            Synchronous xhr in main thread always returns a js string.
-            Some browsers make console noise if you even attempt to set responseType
-            */
-            if (typeof window === "undefined") {
-                xhr.responseType = "arraybuffer";
-            }
-            xhr.send();
-            if (xhr.status >= 200 && xhr.status <= 299) {
-                if (typeof xhr.response === "string") {
-                    lf.f = to_luastring(xhr.response);
-                } else {
-                    lf.f = new Uint8Array(xhr.response);
-                }
-            } else {
-                lf.err = xhr.status;
-                return errfile(L, "open", fnameindex, { message: `${xhr.status}: ${xhr.statusText}` });
-            }
-        }
-        let com = skipcomment(lf);
-        /* check for signature first, as we don't want to add line number corrections in binary case */
-        if (com.c === LUA_SIGNATURE[0] && filename) {  /* binary file? */
-            /* no need to re-open */
-        } else if (com.skipped) { /* read initial portion */
-            lf.buff[lf.n++] = 10 /* '\n'.charCodeAt(0) */;  /* add line to correct line numbers */
-        }
-        if (com.c !== null)
-            lf.buff[lf.n++] = com.c; /* 'c' is the first character of the stream */
-        let status = lua_load(L, getF, lf, lua_tostring(L, -1), mode);
-        let readstatus = lf.err;
-        if (readstatus) {
-            lua_settop(L, fnameindex);  /* ignore results from 'lua_load' */
-            return errfile(L, "read", fnameindex, readstatus);
-        }
-        lua_remove(L, fnameindex);
-        return status;
-    };
-} else {
-    const fs = require('fs');
-
-    class LoadF {
-        constructor() {
-            this.n = NaN;  /* number of pre-read characters */
-            this.f = null;  /* file being read */
-            this.buff = Buffer.alloc(1024);  /* area for reading file */
-            this.pos = 0;  /* current position in file */
-            this.err = void 0;
-        }
-    }
-
-    const getF = function(L, ud) {
-        let lf = ud;
-        let bytes = 0;
-        if (lf.n > 0) {  /* are there pre-read characters to be read? */
-            bytes = lf.n; /* return them (chars already in buffer) */
-            lf.n = 0;  /* no more pre-read characters */
-        } else {  /* read a block from file */
-            try {
-                bytes = fs.readSync(lf.f, lf.buff, 0, lf.buff.length, lf.pos); /* read block */
-            } catch(e) {
-                lf.err = e;
-                bytes = 0;
-            }
-            lf.pos += bytes;
-        }
-        if (bytes > 0)
-            return lf.buff.subarray(0, bytes);
-        else return null;
-    };
-
-    getc = function(lf) {
-        let b = Buffer.alloc(1);
-        let bytes;
-        try {
-            bytes = fs.readSync(lf.f, b, 0, 1, lf.pos);
-        } catch(e) {
-            lf.err = e;
-            return null;
-        }
-        lf.pos += bytes;
-        return bytes > 0 ? b.readUInt8() : null;
-    };
-
-    luaL_loadfilex = function(L, filename, mode) {
-        let lf = new LoadF();
-        let fnameindex = lua_gettop(L) + 1;  /* index of filename on the stack */
-        if (filename === null) {
-            lua_pushliteral(L, "=stdin");
-            lf.f = process.stdin.fd;
-        } else {
-            lua_pushfstring(L, to_luastring("@%s"), filename);
-            try {
-                lf.f = fs.openSync(filename, "r");
-            } catch (e) {
-                return errfile(L, "open", fnameindex, e);
-            }
-        }
-        let com = skipcomment(lf);
-        /* check for signature first, as we don't want to add line number corrections in binary case */
-        if (com.c === LUA_SIGNATURE[0] && filename) {  /* binary file? */
-            /* no need to re-open */
-        } else if (com.skipped) { /* read initial portion */
-            lf.buff[lf.n++] = 10 /* '\n'.charCodeAt(0) */;  /* add line to correct line numbers */
-        }
-        if (com.c !== null)
-            lf.buff[lf.n++] = com.c; /* 'c' is the first character of the stream */
-        let status = lua_load(L, getF, lf, lua_tostring(L, -1), mode);
-        let readstatus = lf.err;
-        if (filename) try { fs.closeSync(lf.f); } catch (e) {}  /* close file (even in case of errors) */
-        if (readstatus) {
-            lua_settop(L, fnameindex);  /* ignore results from 'lua_load' */
-            return errfile(L, "read", fnameindex, readstatus);
-        }
-        lua_remove(L, fnameindex);
-        return status;
-    };
-}
+    return errfile(L, "open", fnameindex, { message: "file loading not supported in this environment" });
+};
 
 const luaL_loadfile = function(L, filename) {
     return luaL_loadfilex(L, filename, null);
@@ -989,18 +839,11 @@ const luaL_dofile = function(L, filename) {
 const lua_writestringerror = function() {
     for (let i=0; i<arguments.length; i++) {
         let a = arguments[i];
-        if (typeof process === "undefined") {
-            /* split along new lines for separate console.error invocations */
-            do {
-                /* regexp uses [\d\D] to work around matching new lines
-                   the 's' flag is non-standard */
-                let r = /([^\n]*)\n?([\d\D]*)/.exec(a);
-                console.error(r[1]);
-                a = r[2];
-            } while (a !== "");
-        } else {
-            process.stderr.write(a);
-        }
+        do {
+            let r = /([^\n]*)\n?([\d\D]*)/.exec(a);
+            console.error(r[1]);
+            a = r[2];
+        } while (a !== "");
     }
 };
 
