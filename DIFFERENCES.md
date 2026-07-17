@@ -97,6 +97,25 @@ Removed Node.js-only functions:
 | Error output | `process.stderr.write()` in Node, `console.error` in browser | Always `console.error` |
 | Path defaults | Platform-specific (Windows `\`, Linux `/usr/local/`, browser `./`) | Always browser defaults (`./lua/5.3/`) |
 
+## Coroutine↔Promise bridge validation
+
+The fork's `lua_yieldk`/`lua_resume` implementation (ported from PUC-Rio Lua 5.3) has been validated for use as a coroutine↔Promise bridge — enabling JS-hosted async operations (e.g., file reads via Obsidian's vault API) to be called transparently from Lua code.
+
+Validation tests in `test/coroutine-promise-bridge.test.js` confirm:
+
+| Test | Description |
+|------|-------------|
+| T1 | C-function yields via `lua_yieldk` with continuation, JS resumes, continuation receives correct status and context |
+| T2 | `lua_isyieldable` returns `true` inside a resumed thread, `false` on main state |
+| T3 | `pcall` around a yielding function works — yield propagates through `pcall` and resume value is returned |
+| T4 | Instruction count hook (`lua_sethook` with `LUA_MASKCOUNT`) fires correctly on thread after yield/resume |
+| T5 | Error propagation via continuation — `nil + errmsg` protocol, `luaL_error` from continuation |
+| T6 | Error propagation through `pcall` across yield — `pcall` catches continuation error, returns `(false, msg)` |
+| T7 | Sequential yields — two async calls in one function, both resume correctly |
+| T8 | Lua-level `coroutine.create` captures yield internally — JS host cannot detect it (confirms C-level `lua_newthread` required for bridge) |
+
+Key finding: `lua_newthread` pushes the thread onto the parent's stack. Using `lua_xmove` immediately after `lua_newthread` moves the thread value itself, not the intended function. The correct pattern: compile the chunk directly on the thread via `luaL_loadstring(thread, code)` — the thread shares globals with the main state. Alternatively, use `lua_rawgeti(thread, LUA_REGISTRYINDEX, ref)` to load from the shared registry.
+
 ## Inherited limitations from upstream
 
 These are upstream fengari limitations that this fork does not attempt to address:
