@@ -167,7 +167,7 @@ const luaD_precall = function(L, off, nresults) {
             if (L.hookmask & LUA_MASKCALL)
                 luaD_hook(L, LUA_HOOKCALL, -1);
             let n = f(L); /* do the actual call */
-            if (typeof n !== "number" || n < 0 || (n|0) !== n)
+            if (typeof n !== "number" || n < 0 || !Number.isSafeInteger(n))
                 throw Error("invalid return value from JS function (expected integer)");
             lapi.api_checknelems(L, n);
 

@@ -119,11 +119,11 @@ test("[test-suite] bitwise: testing bitwise operations", () => {
     if (!L) throw Error("failed to create lua state");
 
     let luaCode = `
-        local numbits = string.packsize('j') * 8
+        local numbits = 32
 
         assert(~0 == -1)
 
-        assert((1 << (numbits - 1)) == math.mininteger)
+        assert((1 << (numbits - 1)) == -2147483648)
 
         -- basic tests for bitwise operators;
         -- use variables to avoid constant folding

@@ -546,7 +546,7 @@ const l_str2int = function(s) {
     if (s[i] === 48 /* ('0').charCodeAt(0) */ && (s[i+1] === 120 /* ('x').charCodeAt(0) */ || s[i+1] === 88 /* ('X').charCodeAt(0) */)) {  /* hex? */
         i += 2;  /* skip '0x' */
         for (; i < s.length && lisxdigit(s[i]); i++) {
-            a = (a * 16 + luaO_hexavalue(s[i]))|0;
+            a = (a * 16 + luaO_hexavalue(s[i]));
             empty = false;
         }
     } else {  /* decimal */
@@ -554,7 +554,7 @@ const l_str2int = function(s) {
             let d = s[i] - 48 /* ('0').charCodeAt(0) */;
             if (a >= MAXBY10 && (a > MAXBY10 || d > MAXLASTD + neg))  /* overflow? */
                 return null;  /* do not accept it (as integer) */
-            a = (a * 10 + d)|0;
+            a = (a * 10 + d);
             empty = false;
         }
     }
@@ -562,7 +562,7 @@ const l_str2int = function(s) {
     if (empty || (i !== s.length && s[i] !== 0)) return null;  /* something wrong in the numeral */
     else {
         return {
-            n: (neg ? -a : a)|0,
+            n: (neg ? -a : a),
             i: i
         };
     }
@@ -735,8 +735,8 @@ const luaO_int2fb = function(x) {
 
 const intarith = function(L, op, v1, v2) {
     switch (op) {
-        case LUA_OPADD:  return (v1 + v2)|0;
-        case LUA_OPSUB:  return (v1 - v2)|0;
+        case LUA_OPADD:  return (v1 + v2);
+        case LUA_OPSUB:  return (v1 - v2);
         case LUA_OPMUL:  return lvm.luaV_imul(v1, v2);
         case LUA_OPMOD:  return lvm.luaV_mod(L, v1, v2);
         case LUA_OPIDIV: return lvm.luaV_div(L, v1, v2);
@@ -745,7 +745,7 @@ const intarith = function(L, op, v1, v2) {
         case LUA_OPBXOR: return (v1 ^ v2);
         case LUA_OPSHL:  return lvm.luaV_shiftl(v1, v2);
         case LUA_OPSHR:  return lvm.luaV_shiftl(v1, -v2);
-        case LUA_OPUNM:  return (0 - v1)|0;
+        case LUA_OPUNM:  return (0 - v1);
         case LUA_OPBNOT: return (~0 ^ v1);
         default: lua_assert(0);
     }

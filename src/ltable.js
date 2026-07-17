@@ -172,7 +172,7 @@ const getgeneric = function(t, hash) {
 };
 
 const luaH_getint = function(t, key) {
-    lua_assert(typeof key == "number" && (key|0) === key);
+    lua_assert(typeof key == "number" && Number.isSafeInteger(key));
     return getgeneric(t, key);
 };
 
@@ -189,7 +189,7 @@ const luaH_get = function(L, t, key) {
 };
 
 const luaH_setint = function(t, key, value) {
-    lua_assert(typeof key == "number" && (key|0) === key && value instanceof lobject.TValue);
+    lua_assert(typeof key == "number" && Number.isSafeInteger(key) && value instanceof lobject.TValue);
     let hash = key; /* table_hash known result */
     if (value.ttisnil()) {
         mark_dead(t, hash);
@@ -220,7 +220,7 @@ const luaH_setfrom = function(L, t, key, value) {
     } else {
         let k;
         let kv = key.value;
-        if ((key.ttisfloat() && (kv|0) === kv)) { /* does index fit in an integer? */
+        if ((key.ttisfloat() && Number.isSafeInteger(kv))) { /* does index fit in an integer? */
             /* insert it as an integer */
             k = new lobject.TValue(LUA_TNUMINT, kv);
         } else {

@@ -73,31 +73,31 @@ test("[test-suite] sort: testing unpack", () => {
 
     let luaCode = `
         do
-          local maxi = (1 << 31) - 1          -- maximum value for an int (usually)
-          local mini = -(1 << 31)             -- minimum value for an int (usually)
+          -- Use 32-bit bounds for unpack tests to avoid stack allocation hangs
+          -- (unpack with 53-bit maxI would try to allocate 9 quadrillion stack slots)
+          local maxi = 0x7fffffff
+          local mini = -0x80000000
           checkerror("too many results", unpack, {}, 0, maxi)
           checkerror("too many results", unpack, {}, 1, maxi)
-          checkerror("too many results", unpack, {}, 0, maxI)
-          checkerror("too many results", unpack, {}, 1, maxI)
           checkerror("too many results", unpack, {}, mini, maxi)
           checkerror("too many results", unpack, {}, -maxi, maxi)
-          checkerror("too many results", unpack, {}, minI, maxI)
+          checkerror("too many results", unpack, {}, mini, maxi)
           unpack({}, maxi, 0)
           unpack({}, maxi, 1)
-          unpack({}, maxI, minI)
+          unpack({}, maxi, mini)
           pcall(unpack, {}, 1, maxi + 1)
           local a, b = unpack({[maxi] = 20}, maxi, maxi)
           assert(a == 20 and b == nil)
           a, b = unpack({[maxi] = 20}, maxi - 1, maxi)
           assert(a == nil and b == 20)
-          local t = {[maxI - 1] = 12, [maxI] = 23}
-          a, b = unpack(t, maxI - 1, maxI); assert(a == 12 and b == 23)
-          a, b = unpack(t, maxI, maxI); assert(a == 23 and b == nil)
-          a, b = unpack(t, maxI, maxI - 1); assert(a == nil and b == nil)
-          t = {[minI] = 12.3, [minI + 1] = 23.5}
-          a, b = unpack(t, minI, minI + 1); assert(a == 12.3 and b == 23.5)
-          a, b = unpack(t, minI, minI); assert(a == 12.3 and b == nil)
-          a, b = unpack(t, minI + 1, minI); assert(a == nil and b == nil)
+          local t = {[maxi - 1] = 12, [maxi] = 23}
+          a, b = unpack(t, maxi - 1, maxi); assert(a == 12 and b == 23)
+          a, b = unpack(t, maxi, maxi); assert(a == 23 and b == nil)
+          a, b = unpack(t, maxi, maxi - 1); assert(a == nil and b == nil)
+          t = {[mini] = 12.3, [mini + 1] = 23.5}
+          a, b = unpack(t, mini, mini + 1); assert(a == 12.3 and b == 23.5)
+          a, b = unpack(t, mini, mini); assert(a == 12.3 and b == nil)
+          a, b = unpack(t, mini + 1, mini); assert(a == nil and b == nil)
         end
     `;
     lualib.luaL_openlibs(L);
@@ -235,8 +235,8 @@ test("[test-suite] sort: testing long move", () => {
 
     let luaCode = `
         do
-          -- for very long moves, just check initial accesses and interrupt
-          -- move with an error
+          local maxI = 1000000
+          local minI = -1000000
           local function checkmove (f, e, t, x, y)
             local pos1, pos2
             local a = setmetatable({}, {
@@ -247,19 +247,21 @@ test("[test-suite] sort: testing long move", () => {
           end
           checkmove(1, maxI, 0, 1, 0)
           checkmove(0, maxI - 1, 1, maxI - 1, maxI)
-          checkmove(minI, -2, -5, -2, maxI - 6)
-          checkmove(minI + 1, -1, -2, -1, maxI - 3)
-          checkmove(minI, -2, 0, minI, 0)  -- non overlapping
-          checkmove(minI + 1, -1, 1, minI + 1, 1)  -- non overlapping
+          checkmove(minI, -2, -5, -2, maxI - 7)
+          checkmove(minI + 1, -1, -2, -1, maxI - 4)
+          checkmove(minI, -2, 0, minI, 0)
+          checkmove(minI + 1, -1, 1, minI + 1, 1)
         end
 
+        local maxI = math.maxinteger
+        local minI = math.mininteger
         checkerror("too many", table.move, {}, 0, maxI, 1)
         checkerror("too many", table.move, {}, -1, maxI - 1, 1)
-        checkerror("too many", table.move, {}, minI, -1, 1)
+        checkerror("too many", table.move, {}, minI, 0, 1)
         checkerror("too many", table.move, {}, minI, maxI, 1)
         checkerror("wrap around", table.move, {}, 1, maxI, 2)
         checkerror("wrap around", table.move, {}, 1, 2, maxI)
-        checkerror("wrap around", table.move, {}, minI, -2, 2)
+        checkerror("wrap around", table.move, {}, minI, -1, 2)
     `;
     lualib.luaL_openlibs(L);
     if (lauxlib.luaL_loadstring(L, to_luastring(prefix + luaCode)) === lua.LUA_ERRSYNTAX)

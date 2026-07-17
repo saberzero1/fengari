@@ -265,7 +265,7 @@ const b_str2int = function(s, base) {
     if (!r) return null;
     let v = parseInt(r[1]+r[2], base);
     if (isNaN(v)) return null;
-    return v|0;
+    return Math.trunc(v);
 };
 
 const luaB_tonumber = function(L) {

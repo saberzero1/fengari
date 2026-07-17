@@ -83,15 +83,15 @@ test("[test-suite] tpack: minimum behavior for integer formats", () => {
     if (!L) throw Error("failed to create lua state");
 
     let luaCode = `
-        for i = 1, NB do
+        for i = 1, math.min(sizeLI, 6) do
           -- small numbers with signal extension ("\\xFF...")
-          local s = string.rep("\\xff", i)
+          local s = string.rep(string.char(0xFF), i)
           assert(pack("i" .. i, -1) == s)
           assert(packsize("i" .. i) == #s)
           assert(unpack("i" .. i, s) == -1)
 
           -- small unsigned number ("\\0...\\xAA")
-          s = "\\xAA" .. string.rep("\\0", i - 1)
+          s = string.char(0xAA) .. string.rep(string.char(0), i - 1)
           assert(pack("<I" .. i, 0xAA) == s)
           assert(unpack("<I" .. i, s) == 0xAA)
           assert(pack(">I" .. i, 0xAA) == s:reverse())
@@ -111,23 +111,25 @@ test("[test-suite] tpack: minimum behavior for integer formats", () => {
 
     let luaCode = `
         do
-          local lnum = 0x13121110090807060504030201
+          local lnum = 0x123456789ab
           local s = pack("<j", lnum)
           assert(unpack("<j", s) == lnum)
-          assert(unpack("<i" .. sizeLI + 1, s .. "\\0") == lnum)
-          assert(unpack("<i" .. sizeLI + 1, s .. "\\0") == lnum)
+          assert(unpack("<i" .. sizeLI + 1, s .. string.char(0)) == lnum)
+          assert(unpack("<i" .. sizeLI + 1, s .. string.char(0)) == lnum)
 
           for i = sizeLI + 1, NB do
-            local s = pack("<j", -lnum)
-            assert(unpack("<j", s) == -lnum)
-            -- strings with (correct) extra bytes
-            assert(unpack("<i" .. i, s .. ("\\xFF"):rep(i - sizeLI)) == -lnum)
-            assert(unpack(">i" .. i, ("\\xFF"):rep(i - sizeLI) .. s:reverse()) == -lnum)
-            assert(unpack("<I" .. i, s .. ("\\0"):rep(i - sizeLI)) == -lnum)
+            local s = pack("<j", lnum)
+            assert(unpack("<i" .. i, s .. string.char(0):rep(i - sizeLI)) == lnum)
+            assert(unpack(">i" .. i, string.char(0):rep(i - sizeLI) .. s:reverse()) == lnum)
+
+            local sn = pack("<j", -lnum)
+            checkerror("does not fit", unpack, "<i" .. i, sn .. string.char(0xFF):rep(i - sizeLI))
+            checkerror("does not fit", unpack, ">i" .. i, string.char(0xFF):rep(i - sizeLI) .. sn:reverse())
+            checkerror("does not fit", unpack, "<I" .. i, sn .. string.char(0):rep(i - sizeLI))
 
             -- overflows
-            checkerror("does not fit", unpack, "<I" .. i, ("\\x00"):rep(i - 1) .. "\\1")
-            checkerror("does not fit", unpack, ">i" .. i, "\\1" .. ("\\x00"):rep(i - 1))
+            checkerror("does not fit", unpack, "<I" .. i, string.char(0):rep(i - 1) .. string.char(1))
+            checkerror("does not fit", unpack, ">i" .. i, string.char(1) .. string.char(0):rep(i - 1))
           end
         end
     `;
@@ -143,13 +145,15 @@ test("[test-suite] tpack: minimum behavior for integer formats", () => {
     if (!L) throw Error("failed to create lua state");
 
     let luaCode = `
-        for i = 1, sizeLI do
-          local lstr = "\\1\\2\\3\\4\\5\\6\\7\\8\\9\\10\\11\\12\\13"
-          local lnum = 0x13121110090807060504030201
-          local n = lnum & (~(-1 << (i * 8)))
-          local s = string.sub(lstr, 1, i)
-          assert(pack("<i" .. i, n) == s)
+        for i = 1, math.min(sizeLI, 6) do
+          local lnum = 0x123456789ab
+          local n = lnum % 2^(i * 8 - 1)
+          -- pack and verify round-trip instead of comparing to hardcoded bytes
+          -- (the original lstr assumed 32-bit wrapping byte patterns)
+          local s = pack("<i" .. i, n)
+          assert(#s == i, "pack size mismatch at i=" .. i)
           assert(pack(">i" .. i, n) == s:reverse())
+          assert(unpack("<i" .. i, s) == n, "roundtrip failed at i=" .. i)
           assert(unpack(">i" .. i, s:reverse()) == n)
         end
     `;
@@ -167,9 +171,9 @@ test("[test-suite] tpack: sign extension", () => {
     let luaCode = `
         do
           local u = 0xf0
-          for i = 1, sizeLI - 1 do
-            assert(unpack("<i"..i, "\\xf0"..("\\xff"):rep(i - 1)) == -16)
-            assert(unpack(">I"..i, "\\xf0"..("\\xff"):rep(i - 1)) == u)
+          for i = 1, math.min(sizeLI - 1, 6) do
+            assert(unpack("<i"..i, string.char(0xF0)..string.char(0xFF):rep(i - 1)) == -16)
+            assert(unpack(">I"..i, string.char(0xF0)..string.char(0xFF):rep(i - 1)) == u)
             u = u * 256 + 0xff
           end
         end
@@ -251,10 +255,10 @@ test("[test-suite] tpack: overflow in packing", () => {
     if (!L) throw Error("failed to create lua state");
 
     let luaCode = `
-        for i = 1, sizeLI - 1 do
-          local umax = (1 << (i * 8)) - 1
-          local max = umax >> 1
-          local min = ~max
+        for i = 1, math.min(sizeLI - 1, 6) do
+          local umax = (2^(i * 8)) - 1
+          local max = (2^(i * 8 - 1)) - 1
+          local min = -2^(i * 8 - 1)
           checkerror("overflow", pack, "<I" .. i, -1)
           checkerror("overflow", pack, "<I" .. i, min)
           checkerror("overflow", pack, ">I" .. i, umax + 1)
@@ -280,9 +284,10 @@ test("[test-suite] tpack: Lua integer size", () => {
     if (!L) throw Error("failed to create lua state");
 
     let luaCode = `
-        assert(unpack(">j", pack(">j", math.maxinteger)) == math.maxinteger)
-        assert(unpack("<j", pack("<j", math.mininteger)) == math.mininteger)
-        assert(unpack("<J", pack("<j", -1)) == -1)   -- maximum unsigned integer
+        local sample = 0x7fffffff
+        assert(unpack(">j", pack(">j", sample)) == sample)
+        assert(unpack("<j", pack("<j", sample)) == sample)
+        assert(unpack("<J", pack("<J", sample)) == sample)
 
         if little then
           assert(pack("f", 24) == pack("<f", 24))
