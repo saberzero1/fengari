@@ -65,8 +65,8 @@ module.exports.LUA_JSPATH_DEFAULT = LUA_JSPATH_DEFAULT;
 */
 const LUA_COMPAT_FLOATSTRING = conf.LUA_COMPAT_FLOATSTRING || false;
 
-const LUA_MAXINTEGER = 2147483647;
-const LUA_MININTEGER = -2147483648;
+const LUA_MAXINTEGER = 9007199254740991;
+const LUA_MININTEGER = -9007199254740991;
 
 /*
 @@ LUAI_MAXSTACK limits the size of the Lua stack.
@@ -92,7 +92,7 @@ const lua_number2str = function(n) {
 };
 
 const lua_numbertointeger = function(n) {
-    return n >= LUA_MININTEGER && n < -LUA_MININTEGER ? n : false;
+    return n >= LUA_MININTEGER && n <= LUA_MAXINTEGER ? n : false;
 };
 
 const LUA_INTEGER_FRMLEN = "";

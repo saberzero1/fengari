@@ -277,7 +277,7 @@ const luaV_execute = function(L) {
                 let numberop1, numberop2;
 
                 if (op1.ttisinteger() && op2.ttisinteger()) {
-                    L.stack[ra].setivalue((op1.value + op2.value)|0);
+                    L.stack[ra].setivalue((op1.value + op2.value));
                 } else if ((numberop1 = tonumber(op1)) !== false && (numberop2 = tonumber(op2)) !== false) {
                     L.stack[ra].setfltvalue(numberop1 + numberop2);
                 } else {
@@ -291,7 +291,7 @@ const luaV_execute = function(L) {
                 let numberop1, numberop2;
 
                 if (op1.ttisinteger() && op2.ttisinteger()) {
-                    L.stack[ra].setivalue((op1.value - op2.value)|0);
+                    L.stack[ra].setivalue((op1.value - op2.value));
                 } else if ((numberop1 = tonumber(op1)) !== false && (numberop2 = tonumber(op2)) !== false) {
                     L.stack[ra].setfltvalue(numberop1 - numberop2);
                 } else {
@@ -430,7 +430,7 @@ const luaV_execute = function(L) {
                 let numberop;
 
                 if (op.ttisinteger()) {
-                    L.stack[ra].setivalue((-op.value)|0);
+                    L.stack[ra].setivalue((-op.value));
                 } else if ((numberop = tonumber(op)) !== false) {
                     L.stack[ra].setfltvalue(-numberop);
                 } else {
@@ -570,7 +570,7 @@ const luaV_execute = function(L) {
             case OP_FORLOOP: {
                 if (L.stack[ra].ttisinteger()) { /* integer loop? */
                     let step = L.stack[ra + 2].value;
-                    let idx = (L.stack[ra].value + step)|0;
+                    let idx = (L.stack[ra].value + step);
                     let limit = L.stack[ra + 1].value;
 
                     if (0 < step ? idx <= limit : limit <= idx) {
@@ -601,7 +601,7 @@ const luaV_execute = function(L) {
                     /* all values are integer */
                     let initv = forlim.stopnow ? 0 : init.value;
                     plimit.value = forlim.ilimit;
-                    init.value = (initv - pstep.value)|0;
+                    init.value = (initv - pstep.value);
                 } else { /* try making all values floats */
                     let nlimit, nstep, ninit;
                     if ((nlimit = tonumber(plimit)) === false)
@@ -923,30 +923,21 @@ const luaV_objlen = function(L, ra, rb) {
     ltm.luaT_callTM(L, tm, rb, rb, ra, 1);
 };
 
-/* Shim taken from https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/imul */
-const luaV_imul = Math.imul || function(a, b) {
-    let aHi = (a >>> 16) & 0xffff;
-    let aLo = a & 0xffff;
-    let bHi = (b >>> 16) & 0xffff;
-    let bLo = b & 0xffff;
-    /*
-    ** the shift by 0 fixes the sign on the high part
-    ** the final |0 converts the unsigned value into a signed value
-    */
-    return ((aLo * bLo) + (((aHi * bLo + aLo * bHi) << 16) >>> 0) | 0);
+const luaV_imul = function(a, b) {
+    return a * b;
 };
 
 const luaV_div = function(L, m, n) {
     if (n === 0)
         ldebug.luaG_runerror(L, to_luastring("attempt to divide by zero"));
-    return Math.floor(m / n)|0;
+    return Math.floor(m / n);
 };
 
 // % semantic on negative numbers is different in js
 const luaV_mod = function(L, m, n) {
     if (n === 0)
         ldebug.luaG_runerror(L, to_luastring("attempt to perform 'n%%0'"));
-    return (m - Math.floor(m / n) * n)|0;
+    return (m - Math.floor(m / n) * n);
 };
 
 const NBITS = 32;

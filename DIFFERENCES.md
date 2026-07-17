@@ -20,10 +20,12 @@ Uses `require('path')`, `require('fs')`, `process.cwd()`, and `(0, eval)('this')
 - Removed `require('os').platform()` Windows/Linux path detection branch. Collapsed the `if/else if/else` conditional to always use the browser path defaults (`LUA_DIRSEP = "/"`, relative `LUA_LDIR`/`LUA_JSDIR` paths).
 - `LUA_EXEC_DIR` export remains but is unused (was only consumed by the removed `loadlib.js`).
 - The `FENGARICONF` environment variable for runtime configuration is not supported.
+- Integer widening: `LUA_MAXINTEGER` changed from `2147483647` to `9007199254740991`. `LUA_MININTEGER` changed from `-2147483648` to `-9007199254740991`. `lua_numbertointeger` bounds check changed from `n < -LUA_MININTEGER` to `n <= LUA_MAXINTEGER` (symmetric bounds fix).
 
 ### `src/lbaselib.js`
 
 - Removed `process.stdout.write(Buffer.from(s))` branch for `print()` output. Always uses the browser implementation (`TextDecoder` + `console.log`, or `to_jsstring` + `console.log` fallback).
+- Integer widening: `b_str2int` (`tonumber` with base) replaced `v|0` with `Math.trunc(v)` to avoid 32-bit truncation of `parseInt` results.
 
 ### `src/lauxlib.js`
 
@@ -60,6 +62,39 @@ Removed Node.js-only functions:
 - Removed `require('readline-sync')` import and `debug.debug()` interactive REPL function. The `debug.debug()` function is not available in this fork.
 - All other debug library functions are retained (`debug.traceback`, `debug.getinfo`, `debug.sethook`, `debug.gethook`, `debug.getlocal`, `debug.setlocal`, `debug.getupvalue`, `debug.setupvalue`, `debug.upvalueid`, `debug.upvaluejoin`, `debug.getuservalue`, `debug.setuservalue`, `debug.getmetatable`, `debug.setmetatable`, `debug.getregistry`). These are all pure JavaScript.
 
+### `src/lstrlib.js`
+
+- Replaced `sprintf-js` dependency with custom `luaSprintf` function for `string.format` implementation. All `sprintf` call sites replaced with the built-in formatter.
+- Integer widening: `SZINT` changed from 4 to 8. `packint` byte extraction rewritten to use `Math.floor(n / 256)` instead of `n >>= 8` (32-bit shift). `unpackint` accumulation rewritten to use `res * 256 + byte` instead of `res <<= 8 | byte`. Sign extension and overflow checks updated for sizes 5-7 (newly reachable with SZINT=8).
+
+### `src/lvm.js`
+
+- Integer widening: removed `|0` truncation from integer add, sub, unary minus, for-loop step/init, IDIV, MOD. Replaced `Math.imul` with standard `*` operator in `luaV_imul`.
+
+### `src/lobject.js`
+
+- Integer widening: removed `|0` truncation from `intarith` (add, sub, unary minus) and `l_str2int` (hex/decimal parsing, result).
+
+### `src/ltable.js`
+
+- Integer widening: replaced `(key|0) === key` integer checks with `Number.isSafeInteger(key)` in `luaH_getint`, `luaH_setint`, and `luaH_setfrom`.
+
+### `src/lapi.js`
+
+- Integer widening: replaced `(n|0) === n` with `Number.isSafeInteger(n)` in `fengari_argcheckinteger` and upvalue index validation.
+
+### `src/ldo.js`
+
+- Integer widening: replaced `(n|0) !== n` with `!Number.isSafeInteger(n)` in JS function return value validation.
+
+### `src/llimits.js`
+
+- Integer widening: `MAX_INT` changed from `2147483647` to `9007199254740991` (`Number.MAX_SAFE_INTEGER`). Controls `l_str2int` overflow detection.
+
+### `src/lmathlib.js`
+
+- Integer widening: removed `|0` truncation from `math.abs` and `math.fmod`. `l_rand` and `l_srand` remain 32-bit (LCG is 31-bit internal).
+
 ### `src/lualib.js`
 
 - Removed `io` library exports (`LUA_IOLIBNAME`, `luaopen_io`).
@@ -78,11 +113,15 @@ Removed Node.js-only functions:
 | `readline-sync` | `ldblib.js` (`debug.debug()` interactive input) | Node.js-only CLI package |
 | `tmp` | `loslib.js` (`os.tmpname`) | Node.js-only temp file creation |
 
+## Dependencies removed (fork-specific)
+
+| Package | Was used by | Replacement |
+|---------|------------|-------------|
+| `sprintf-js` | `lstrlib.js` (Lua `string.format`) | Custom `luaSprintf` — purpose-built formatter handling Lua's format specifiers (`%d`, `%i`, `%u`, `%o`, `%x`, `%X`, `%e`, `%E`, `%f`, `%g`, `%G`, `%c`, `%s`, `%%`). Eliminates the fork's last runtime dependency. |
+
 ## Dependencies kept
 
-| Package | Used by | Reason |
-|---------|--------|--------|
-| `sprintf-js` | `lstrlib.js` (Lua `string.format`) | Pure JavaScript, required for C-style format specifiers |
+None. This fork ships with zero runtime dependencies.
 
 ## Behavioral differences
 
@@ -96,6 +135,10 @@ Removed Node.js-only functions:
 | `FENGARICONF` env var | Reads `process.env.FENGARICONF` for runtime config | Not supported |
 | Error output | `process.stderr.write()` in Node, `console.error` in browser | Always `console.error` |
 | Path defaults | Platform-specific (Windows `\`, Linux `/usr/local/`, browser `./`) | Always browser defaults (`./lua/5.3/`) |
+| Integer range | 32-bit (±2^31) | 53-bit (±(2^53 - 1)) — see [Integer widening](#integer-widening-32-bit--53-bit) |
+| `string.packsize("j")` | 4 | 8 |
+| `string.format` | Via `sprintf-js` npm package | Custom `luaSprintf` (zero dependencies) |
+| Bitwise operations | 32-bit | 32-bit (unchanged) |
 
 ## Coroutine↔Promise bridge validation
 
@@ -116,6 +159,34 @@ Validation tests in `test/coroutine-promise-bridge.test.js` confirm:
 
 Key finding: `lua_newthread` pushes the thread onto the parent's stack. Using `lua_xmove` immediately after `lua_newthread` moves the thread value itself, not the intended function. The correct pattern: compile the chunk directly on the thread via `luaL_loadstring(thread, code)` — the thread shares globals with the main state. Alternatively, use `lua_rawgeti(thread, LUA_REGISTRYINDEX, ref)` to load from the shared registry.
 
+## Integer widening (32-bit → 53-bit)
+
+Upstream fengari uses 32-bit integers (`LUA_INT_TYPE=LUA_INT_LONG` equivalent). This fork widens integers to 53-bit using JavaScript `Number` precision.
+
+### What changed
+
+| Aspect | Upstream fengari | This fork |
+|--------|-----------------|-----------|
+| `math.maxinteger` | `2147483647` (2^31 - 1) | `9007199254740991` (2^53 - 1) |
+| `math.mininteger` | `-2147483648` (-(2^31)) | `-9007199254740991` (-(2^53 - 1), symmetric) |
+| `string.packsize("j")` | 4 | 8 |
+| Integer arithmetic | 32-bit with `\|0` truncation | 53-bit, no truncation |
+| `tonumber("1099511627776")` | `nil` (overflow) | `1099511627776` (valid integer) |
+| `tonumber("FFFFFFFFFF", 16)` | `nil` (overflow) | `1099511627775` (valid integer) |
+| Bitwise operations | 32-bit | 32-bit (unchanged — JS platform limitation) |
+
+### Remaining limitations
+
+- **Bitwise operations remain 32-bit**: `&`, `|`, `^`, `~`, `<<`, `>>` coerce operands to 32-bit signed integers via JavaScript's `ToInt32`. Values > 2^31 are silently truncated. This is a fundamental JavaScript platform constraint.
+- **Multiplication precision**: `a * b` where both operands > 2^26 may produce a product > 2^53, silently losing precision. Standard Lua 5.3 wraps via 2's complement; this fork loses low bits.
+- **Overflow behavior**: Arithmetic exceeding 2^53 - 1 silently loses precision (matches JavaScript `Number` behavior). Standard Lua wraps.
+- **Symmetric bounds**: `math.mininteger = -(2^53 - 1)`, not `-(2^53)`. Standard Lua uses asymmetric 2's complement. `math.ult` semantics may differ for negative inputs.
+- **Hex overflow precision**: `tonumber("0x...", 16)` for hex values > 2^53 may lose precision. No explicit overflow check — matching PUC-Rio Lua's hex parsing design (no overflow detection in hex path).
+
+### `string.format` implementation
+
+`string.format` uses a custom `luaSprintf` function (replacing `sprintf-js`). The formatter handles all Lua format specifiers and modifiers. Output is byte-identical to the previous `sprintf-js` implementation for all standard format patterns. The `%a`/`%A` (hex float) mantissa is built manually in `num2straux`; only the exponent part (`p%+d`) goes through `luaSprintf`.
+
 ## Inherited limitations from upstream
 
 These are upstream fengari limitations that this fork does not attempt to address:
@@ -123,7 +194,6 @@ These are upstream fengari limitations that this fork does not attempt to addres
 - `__gc` metamethods don't work (no custom GC; relies on JavaScript garbage collector)
 - Weak tables (`__mode`) are not supported
 - `lua_gc` / `collectgarbage` are not implemented
-- Integer type is 32-bit (JavaScript number limitation)
 
 ## Upstream sync policy
 

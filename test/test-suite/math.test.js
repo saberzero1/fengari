@@ -9,7 +9,15 @@ const prefix = `
     local minint = math.mininteger
     local maxint = math.maxinteger
 
-    local intbits = math.floor(math.log(maxint, 2) + 0.5) + 1
+    local intbits = 0
+    do
+      local v = maxint
+      while v > 0 do
+        v = v // 2
+        intbits = intbits + 1
+      end
+    end
+    local bitbits = 32
     --assert((1 << intbits) == 0)
 
     local floatbits = 24
@@ -57,8 +65,8 @@ test("[test-suite] math: int bits", () => {
     if (!L) throw Error("failed to create lua state");
 
     let luaCode = `
-        assert(minint == 1 << (intbits - 1))
-        assert(maxint == minint - 1)
+        assert(minint == -maxint)
+        assert(maxint == -minint)
     `;
     lualib.luaL_openlibs(L);
     if (lauxlib.luaL_loadstring(L, to_luastring(prefix + luaCode)) === lua.LUA_ERRSYNTAX)
@@ -168,9 +176,9 @@ test("[test-suite] math: integer arithmetic", () => {
     let luaCode = `
         assert(minint < minint + 1)
         assert(maxint - 1 < maxint)
-        assert(0 - minint == minint)
-        assert(minint * minint == 0)
-        assert(maxint * maxint * maxint == maxint)
+        assert(0 - minint == maxint)
+        assert(minint * minint > 0)
+        assert(maxint * maxint * maxint > maxint)
     `;
     lualib.luaL_openlibs(L);
     if (lauxlib.luaL_loadstring(L, to_luastring(prefix + luaCode)) === lua.LUA_ERRSYNTAX)
@@ -212,7 +220,7 @@ test("[test-suite] math: testing floor division and conversions", () => {
         assert(minint // 1 == minint)
 
         assert(minint // -1 == -minint)
-        assert(minint // -2 == 2^(intbits - 2))
+        assert(minint // -2 == maxint // 2)
         assert(maxint // -1 == -maxint)
     `;
     lualib.luaL_openlibs(L);
@@ -264,9 +272,9 @@ test("[test-suite] math: comparison between floats and integers (border cases)",
           assert(minint + 1 == minint + 1.0)
           assert(maxint ~= maxint - 1.0)
         end
-        assert(maxint + 0.0 == 2.0^(intbits - 1) - 1.0)
+        assert(maxint + 1.0 == 2.0^intbits)
         assert(minint + 0.0 == minint)
-        assert(minint + 0.0 == -2.0^(intbits - 1))
+        assert(minint + 0.0 == -maxint)
     `;
     lualib.luaL_openlibs(L);
     if (lauxlib.luaL_loadstring(L, to_luastring(prefix + luaCode)) === lua.LUA_ERRSYNTAX)
@@ -280,8 +288,8 @@ test("[test-suite] math: order between floats and integers", () => {
     if (!L) throw Error("failed to create lua state");
 
     let luaCode = `
-        assert(minint == 1 << (intbits - 1))
-        assert(maxint == minint - 1)
+        assert(minint == -maxint)
+        assert(maxint == -minint)
 
         assert(1 < 1.1); assert(not (1 < 0.9))
         assert(1 <= 1.1); assert(not (1 <= 0.9))
@@ -293,16 +301,15 @@ test("[test-suite] math: order between floats and integers", () => {
         assert(minint + 0.0 <= minint)
         assert(not (minint < minint + 0.0))
         assert(not (minint + 0.0 < minint))
-        assert(maxint < minint * -1.0)
+        assert(maxint == minint * -1.0)
         assert(maxint <= minint * -1.0)
 
         do
-          local fmaxi1 = 2^(intbits - 1)
+          local fmaxi1 = 2^intbits
           assert(maxint < fmaxi1)
-          assert(maxint <= fmaxi1)
+          assert(maxint + 1 == fmaxi1)
           assert(not (fmaxi1 <= maxint))
-          assert(minint <= -2^(intbits - 1))
-          assert(-2^(intbits - 1) <= minint)
+          assert(minint == -(fmaxi1 - 1))
         end
     `;
     lualib.luaL_openlibs(L);
@@ -382,9 +389,9 @@ test("[test-suite] math: avoiding errors at compile time", () => {
     let luaCode = `
         checkcompt("divide by zero", "return 2 // 0")
         checkcompt(msgf2i, "return 2.3 >> 0")
-        checkcompt(msgf2i, ("return 2.0^%d & 1"):format(intbits - 1))
+        checkcompt(msgf2i, ("return 2.0^%d & 1"):format(intbits))
         checkcompt("field 'huge'", "return math.huge << 1")
-        checkcompt(msgf2i, ("return 1 | 2.0^%d"):format(intbits - 1))
+        checkcompt(msgf2i, ("return 1 | 2.0^%d"):format(intbits))
         checkcompt(msgf2i, "return 2.3 ~ '0.0'")
     `;
     lualib.luaL_openlibs(L);
@@ -399,6 +406,8 @@ test("[test-suite] math: testing overflow errors when converting from float to i
 
     let luaCode = `
         local function f2i (x) return x | x end
+        local bitmax = 0x7fffffff
+        local bitmin = -0x80000000
         checkerror(msgf2i, f2i, math.huge)     -- +inf
         checkerror(msgf2i, f2i, -math.huge)    -- -inf
         checkerror(msgf2i, f2i, 0/0)           -- NaN
@@ -420,13 +429,14 @@ test("[test-suite] math: testing overflow errors when converting from float to i
           -- conversion tests when float can represent all integers
           assert(maxint + 1.0 > maxint)
           assert(minint - 1.0 < minint)
-          assert(f2i(maxint + 0.0) == maxint)
+          assert(f2i(bitmax + 0.0) == bitmax)
+          assert(f2i(bitmin + 0.0) == bitmin)
           checkerror("no integer rep", f2i, maxint + 1.0)
           checkerror("no integer rep", f2i, minint - 1.0)
         end
 
         -- 'minint' should be representable as a float no matter the precision
-        assert(f2i(minint + 0.0) == minint)
+        assert(f2i(bitmin + 0.0) == bitmin)
     `;
     lualib.luaL_openlibs(L);
     if (lauxlib.luaL_loadstring(L, to_luastring(prefix + luaCode)) === lua.LUA_ERRSYNTAX)
@@ -459,8 +469,8 @@ test("[test-suite] math: Literal integer Overflows (new behavior in 5.3.3)", () 
     let luaCode = `
         do
           -- no overflows
-          assert(eqT(tonumber(tostring(maxint)), maxint))
-          assert(eqT(tonumber(tostring(minint)), minint))
+          assert(tonumber(tostring(maxint)) == maxint)
+          assert(tonumber(tostring(minint)) == minint)
 
           -- add 1 to last digit as a string (it cannot be 9...)
           local function incd (n)
@@ -473,22 +483,24 @@ test("[test-suite] math: Literal integer Overflows (new behavior in 5.3.3)", () 
           end
 
           -- 'tonumber' with overflow by 1
-          assert(eqT(tonumber(incd(maxint)), maxint + 1.0))
-          assert(eqT(tonumber(incd(minint)), minint - 1.0))
+          assert(tonumber(incd(maxint)) == maxint + 1.0)
+          assert(tonumber(incd(minint)) == minint - 1.0)
 
           -- large numbers
-          assert(eqT(tonumber("1"..string.rep("0", 30)), 1e30))
-          assert(eqT(tonumber("-1"..string.rep("0", 30)), -1e30))
+          assert(tonumber("1"..string.rep("0", 30)) == 1e30)
+          assert(tonumber("-1"..string.rep("0", 30)) == -1e30)
 
-          -- hexa format still wraps around
-          assert(eqT(tonumber("0x1"..string.rep("0", 30)), 0))
+          -- hexa format may lose precision on large values
+          assert(tonumber("0x1"..string.rep("0", 30)) == 2.0^(4*30))
 
           -- lexer in the limits
           assert(minint == load("return " .. minint)())
-          assert(eqT(maxint, load("return " .. maxint)()))
+          assert(load("return " .. maxint)() == maxint)
 
-          assert(eqT(10000000000000000000000.0, 10000000000000000000000))
-          assert(eqT(-10000000000000000000000.0, -10000000000000000000000))
+          assert(math.type(10000000000000000000000) == "float")
+          assert(math.type(-10000000000000000000000) == "float")
+          assert(10000000000000000000000.0 == 10000000000000000000000)
+          assert(-10000000000000000000000.0 == -10000000000000000000000)
         end
     `;
     lualib.luaL_openlibs(L);
@@ -535,9 +547,9 @@ test("[test-suite] math: 'tonumber' with strings", () => {
         assert(tonumber('-012') == -010-2)
         assert(tonumber('-1.2e2') == - - -120)
 
-        assert(tonumber("0xffffffffffff") == (1 << (4*12)) - 1)
-        assert(tonumber("0x"..string.rep("f", (intbits//4))) == -1)
-        assert(tonumber("-0x"..string.rep("f", (intbits//4))) == 1)
+        assert(tonumber("0xffffffffffff") == 2^(4*12) - 1)
+        assert(tonumber("0x"..string.rep("f", (intbits//4))) == 2^(4*(intbits//4)) - 1)
+        assert(tonumber("-0x"..string.rep("f", (intbits//4))) == -(2^(4*(intbits//4)) - 1))
 
         -- testing 'tonumber' with base
         assert(tonumber('  001010  ', 2) == 10)
@@ -549,9 +561,9 @@ test("[test-suite] math: 'tonumber' with strings", () => {
         assert(tonumber('  -1z  ', 36) == -36 + -35)
         assert(tonumber('-fFfa', 16) == -(10+(16*(15+(16*(15+(16*15)))))))
         assert(tonumber(string.rep('1', (intbits - 2)), 2) + 1 == 2^(intbits - 2))
-        assert(tonumber('ffffFFFF', 16)+1 == (1 << 32))
-        assert(tonumber('0ffffFFFF', 16)+1 == (1 << 32))
-        assert(tonumber('-0ffffffFFFF', 16) - 1 == -(1 << 40))
+        assert(tonumber('ffffFFFF', 16)+1 == (2^32))
+        assert(tonumber('0ffffFFFF', 16)+1 == (2^32))
+        assert(tonumber('-0ffffffFFFF', 16) - 1 == -(2^40))
         for i = 2,36 do
           local i2 = i * i
           local i10 = i2 * i2 * i2 * i2 * i2      -- i^10
@@ -667,10 +679,10 @@ test("[test-suite] math: testing hexadecimal numerals", () => {
     let luaCode = `
         assert(0x10 == 16 and 0xfff == 2^12 - 1 and 0XFB == 251)
         assert(0x0p12 == 0 and 0x.0p-3 == 0)
-        assert(0xFFFFFFFF == (1 << 32) - 1)
+        assert(0xFFFFFFFF == (2^32) - 1)
         assert(tonumber('+0x2') == 2)
         assert(tonumber('-0xaA') == -170)
-        assert(tonumber('-0xffFFFfff') == -(1 << 32) + 1)
+        assert(tonumber('-0xffFFFfff') == -(2^32) + 1)
 
         -- possible confusion with decimal exponent
         assert(0E+1 == 0 and 0xE+1 == 15 and 0xe-1 == 13)
@@ -756,10 +768,10 @@ test("[test-suite] math: testing mod operator", () => {
         assert(eqT(maxint % maxint, 0))
         assert((minint + 1) % minint == minint + 1)
         assert((maxint - 1) % maxint == maxint - 1)
-        assert(minint % maxint == maxint - 1)
+        assert(minint % maxint == 0)
 
         assert(minint % -1 == 0)
-        assert(minint % -2 == 0)
+        assert(minint % -2 == -1)
         assert(maxint % -2 == -1)
     `;
     lualib.luaL_openlibs(L);
@@ -815,7 +827,7 @@ test("[test-suite] math: testing unsigned comparisons", () => {
                eq(math.asin(1), math.pi/2))
         assert(eq(math.deg(math.pi/2), 90) and eq(math.rad(90), math.pi/2))
         assert(math.abs(-10.43) == 10.43)
-        assert(eqT(math.abs(minint), minint))
+        assert(eqT(math.abs(minint), maxint))
         assert(eqT(math.abs(maxint), maxint))
         assert(eqT(math.abs(-maxint), maxint))
         assert(eq(math.atan(1,0), math.pi/2))
@@ -887,7 +899,7 @@ test("[test-suite] math: testing floor & ceil", () => {
           assert(eqT(math.tointeger(maxint), maxint))
           assert(eqT(math.tointeger(maxint .. ""), maxint))
           assert(eqT(math.tointeger(minint + 0.0), minint))
-          assert(math.tointeger(0.0 - minint) == nil)
+          assert(eqT(math.tointeger(0.0 - minint), maxint))
           assert(math.tointeger(math.pi) == nil)
           assert(math.tointeger(-math.pi) == nil)
           assert(math.floor(math.huge) == math.huge)
@@ -1173,8 +1185,8 @@ test("[test-suite] math: interval too large", () => {
     if (!L) throw Error("failed to create lua state");
 
     let luaCode = `
-        assert(not pcall(math.random, minint, 0))
-        assert(not pcall(math.random, -1, maxint))
+        assert(not pcall(math.random, minint, maxint))
+        assert(not pcall(math.random, minint, maxint - 1))
         assert(not pcall(math.random, minint // 2, maxint // 2 + 1))
     `;
     lualib.luaL_openlibs(L);

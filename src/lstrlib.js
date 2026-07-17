@@ -1,10 +1,9 @@
 "use strict";
 
-const { sprintf } = require('sprintf-js');
-
 const {
     LUA_INTEGER_FMT,
     LUA_INTEGER_FRMLEN,
+    LUA_MAXINTEGER,
     LUA_MININTEGER,
     LUA_NUMBER_FMT,
     LUA_NUMBER_FRMLEN,
@@ -83,6 +82,216 @@ const {
 
 const sL_ESC  = '%';
 const L_ESC   = sL_ESC.charCodeAt(0);
+
+const LUA_FORMAT_FLAGS = "-+ #0";
+
+const luaSprintf = function(format, value) {
+    const percentIndex = format.indexOf('%');
+    if (percentIndex === -1)
+        return format;
+
+    if (format[percentIndex + 1] === '%') {
+        const nextPercent = format.indexOf('%', percentIndex + 2);
+        if (nextPercent === -1)
+            return format.slice(0, percentIndex) + '%' + format.slice(percentIndex + 2);
+    }
+
+    const prefix = format.slice(0, percentIndex);
+    let i = percentIndex + 1;
+    let flags = "";
+    while (i < format.length && LUA_FORMAT_FLAGS.includes(format[i])) {
+        if (!flags.includes(format[i]))
+            flags += format[i];
+        i++;
+    }
+
+    let width = null;
+    let widthStart = i;
+    while (i < format.length && format[i] >= '0' && format[i] <= '9') i++;
+    if (i > widthStart)
+        width = parseInt(format.slice(widthStart, i), 10);
+
+    let precision = null;
+    if (format[i] === '.') {
+        i++;
+        let precisionStart = i;
+        while (i < format.length && format[i] >= '0' && format[i] <= '9') i++;
+        precision = precisionStart === i ? 0 : parseInt(format.slice(precisionStart, i), 10);
+    }
+
+    while (i < format.length && "hlLjztI".includes(format[i]))
+        i++;
+
+    const spec = format[i++];
+    const suffix = format.slice(i);
+
+    const leftJustify = flags.includes('-');
+    const signFlag = flags.includes('+') ? '+' : (flags.includes(' ') ? ' ' : '');
+
+    const applyWidth = function(text, padChar = ' ') {
+        if (width === null || text.length >= width)
+            return text;
+        const padding = padChar.repeat(width - text.length);
+        return leftJustify ? text + padding : padding + text;
+    };
+
+    const applyNumericWidth = function(sign, prefixText, digits, padChar, precisionSpecified) {
+        let base = sign + prefixText + digits;
+        if (width === null || base.length >= width)
+            return base;
+        const padLength = width - base.length;
+        if (padChar === '0' && !leftJustify && !precisionSpecified) {
+            return sign + prefixText + '0'.repeat(padLength) + digits;
+        }
+        return applyWidth(base, ' ');
+    };
+
+    const formatInteger = function(n, base, unsigned, upper) {
+        let sign = '';
+        let num = Number(n);
+        if (!unsigned) {
+            if (num < 0) {
+                sign = '-';
+                num = -num;
+            } else {
+                sign = signFlag;
+            }
+        }
+
+        if (unsigned) {
+            num = (num >>> 0);
+        }
+
+        let digits = Math.trunc(num).toString(base);
+        if (upper)
+            digits = digits.toUpperCase();
+
+        const precisionSpecified = precision !== null;
+        if (precisionSpecified) {
+            if (num === 0 && precision === 0) {
+                digits = '';
+            } else {
+                digits = digits.padStart(precision, '0');
+            }
+        }
+
+        let prefixText = '';
+        if (flags.includes('#')) {
+            if (base === 8) {
+                if (digits[0] !== '0')
+                    prefixText = '0';
+                if (num === 0 && precision === 0)
+                    prefixText = '0';
+            } else if (base === 16 && num !== 0) {
+                prefixText = upper ? '0X' : '0x';
+            }
+        }
+
+        const padChar = flags.includes('0') ? '0' : ' ';
+        return applyNumericWidth(sign, prefixText, digits, padChar, precisionSpecified);
+    };
+
+    const trimTrailingZeros = function(text) {
+        let expIndex = text.indexOf('e');
+        if (expIndex === -1)
+            expIndex = text.indexOf('E');
+        let mantissa = expIndex === -1 ? text : text.slice(0, expIndex);
+        let exponent = expIndex === -1 ? '' : text.slice(expIndex);
+        if (mantissa.indexOf('.') !== -1) {
+            mantissa = mantissa.replace(/0+$/, '').replace(/\.$/, '');
+        }
+        return mantissa + exponent;
+    };
+
+    const formatFloat = function(n, specifier) {
+        let num = Number(n);
+        let sign = '';
+        if (num < 0) {
+            sign = '-';
+            num = -num;
+        } else {
+            sign = signFlag;
+        }
+
+        if (!Number.isFinite(num)) {
+            const literal = Number.isNaN(num) ? 'nan' : 'inf';
+            return applyNumericWidth(sign, '', literal, flags.includes('0') ? '0' : ' ', false);
+        }
+
+        let prec = precision !== null ? precision : 6;
+        let formatted;
+        switch (specifier) {
+            case 'e': case 'E':
+                formatted = num.toExponential(prec);
+                if (prec === 0 && flags.includes('#') && formatted.indexOf('.') === -1) {
+                    const expPos = formatted.indexOf('e');
+                    formatted = formatted.slice(0, expPos) + '.' + formatted.slice(expPos);
+                }
+                break;
+            case 'f':
+                formatted = num.toFixed(prec);
+                if (prec === 0 && flags.includes('#') && formatted.indexOf('.') === -1)
+                    formatted += '.';
+                break;
+            case 'g': case 'G': {
+                const sig = prec === 0 ? 1 : prec;
+                formatted = num.toPrecision(sig);
+                if (!flags.includes('#'))
+                    formatted = trimTrailingZeros(formatted);
+                break;
+            }
+            default:
+                formatted = String(num);
+        }
+
+        if ((specifier === 'E' || specifier === 'G') && formatted.indexOf('e') !== -1)
+            formatted = formatted.replace('e', 'E');
+
+        const padChar = flags.includes('0') ? '0' : ' ';
+        return applyNumericWidth(sign, '', formatted, padChar, precision !== null);
+    };
+
+    let result;
+    switch (spec) {
+        case 'd': case 'i':
+            result = formatInteger(value, 10, false, false);
+            break;
+        case 'u':
+            result = formatInteger(value, 10, true, false);
+            break;
+        case 'o':
+            result = formatInteger(value, 8, true, false);
+            break;
+        case 'x':
+            result = formatInteger(value, 16, true, false);
+            break;
+        case 'X':
+            result = formatInteger(value, 16, true, true);
+            break;
+        case 'e': case 'E': case 'f': case 'g': case 'G':
+            result = formatFloat(value, spec);
+            break;
+        case 'c': {
+            const char = typeof value === 'number' ? String.fromCharCode(value) : String(value || '')[0] || '';
+            result = applyWidth(char, ' ');
+            break;
+        }
+        case 's': {
+            let text = String(value);
+            if (precision !== null)
+                text = text.slice(0, precision);
+            result = applyWidth(text, ' ');
+            break;
+        }
+        case '%':
+            result = '%';
+            break;
+        default:
+            result = '';
+    }
+
+    return prefix + result + suffix;
+};
 
 /*
 ** maximum number of captures that a pattern can do during
@@ -169,7 +378,7 @@ const num2straux = function(x) {
         return to_luastring('nan');
     else if (x === 0) {  /* can be -0... */
         /* create "0" or "-0" followed by exponent */
-        let zero = sprintf(LUA_NUMBER_FMT + "x0p+0", x);
+        let zero = luaSprintf(LUA_NUMBER_FMT + "x0p+0", x);
         if (Object.is(x, -0))
             zero = "-" + zero;
         return to_luastring(zero);
@@ -185,7 +394,7 @@ const num2straux = function(x) {
         buff += "0x";  /* add "0x" */
         buff += (m * (1<<L_NBFD)).toString(16);
         e -= L_NBFD;  /* this digit goes before the radix point */
-        buff += sprintf("p%+d", e);  /* add exponent */
+        buff += luaSprintf("p%+d", e);  /* add exponent */
         return to_luastring(buff);
     }
 };
@@ -279,10 +488,8 @@ const addliteral = function(L, b, arg) {
                 checkdp(buff);  /* ensure it uses a dot */
             } else {  /* integers */
                 let n = lua_tointeger(L, arg);
-                let format = (n === LUA_MININTEGER)  /* corner case? */
-                    ? "0x%" + LUA_INTEGER_FRMLEN + "x"  /* use hexa */
-                    : LUA_INTEGER_FMT;  /* else use default format */
-                buff = to_luastring(sprintf(format, n));
+                let format = LUA_INTEGER_FMT;
+                buff = to_luastring(luaSprintf(format, n));
             }
             luaL_addstring(b, buff);
             break;
@@ -358,7 +565,7 @@ const str_format = function(L) {
                 case 'o': case 'u': case 'x': case 'X': {
                     let n = luaL_checkinteger(L, arg);
                     addlenmod(form, to_luastring(LUA_INTEGER_FRMLEN, true));
-                    luaL_addstring(b, to_luastring(sprintf(String.fromCharCode(...form), n)));
+                    luaL_addstring(b, to_luastring(luaSprintf(String.fromCharCode(...form), n)));
                     break;
                 }
                 case 'a': case 'A': {
@@ -370,7 +577,7 @@ const str_format = function(L) {
                 case 'g': case 'G': {
                     let n = luaL_checknumber(L, arg);
                     addlenmod(form, to_luastring(LUA_INTEGER_FRMLEN, true));
-                    luaL_addstring(b, to_luastring(sprintf(String.fromCharCode(...form), n)));
+                    luaL_addstring(b, to_luastring(luaSprintf(String.fromCharCode(...form), n)));
                     break;
                 }
                 case 'q': {
@@ -388,7 +595,7 @@ const str_format = function(L) {
                             luaL_addvalue(b);  /* keep entire string */
                         } else {  /* format the string into 'buff' */
                             // TODO: will fail if s is not valid UTF-8
-                            luaL_addstring(b, to_luastring(sprintf(String.fromCharCode(...form), to_jsstring(s))));
+                            luaL_addstring(b, to_luastring(luaSprintf(String.fromCharCode(...form), to_jsstring(s))));
                             lua_pop(L, 1);  /* remove result from 'luaL_tolstring' */
                         }
                     }
@@ -410,7 +617,7 @@ const LUAL_PACKPADBYTE = 0x00;
 /* maximum size for the binary representation of an integer */
 const MAXINTSIZE = 16;
 
-const SZINT = 4; // Size of lua_Integer
+const SZINT = 8; // Size of lua_Integer
 
 /* number of bits in a character */
 const NB = 8;
@@ -484,9 +691,9 @@ const getoption = function(h, fmt) {
         case 72  /*'H'*/: r.size = 2; r.opt = Kuint;  return r;
         case 108 /*'l'*/: r.size = 4; r.opt = Kint;   return r; // sizeof(long): 4
         case 76  /*'L'*/: r.size = 4; r.opt = Kuint;  return r;
-        case 106 /*'j'*/: r.size = 4; r.opt = Kint;   return r; // sizeof(lua_Integer): 4
-        case 74  /*'J'*/: r.size = 4; r.opt = Kuint;  return r;
-        case 84  /*'T'*/: r.size = 4; r.opt = Kuint;  return r; // sizeof(size_t): 4
+        case 106 /*'j'*/: r.size = SZINT; r.opt = Kint;   return r; // sizeof(lua_Integer)
+        case 74  /*'J'*/: r.size = SZINT; r.opt = Kuint;  return r;
+        case 84  /*'T'*/: r.size = SZINT; r.opt = Kuint;  return r; // sizeof(size_t)
         case 102 /*'f'*/: r.size = 4; r.opt = Kfloat; return r; // sizeof(float): 4
         case 100 /*'d'*/: r.size = 8; r.opt = Kfloat; return r; // sizeof(double): 8
         case 110 /*'n'*/: r.size = 8; r.opt = Kfloat; return r; // sizeof(lua_Number): 8
@@ -567,7 +774,7 @@ const packint = function(b, n, islittle, size, neg) {
     let buff = luaL_prepbuffsize(b, size);
     buff[islittle ? 0 : size - 1] = n & MC;  /* first byte */
     for (let i = 1; i < size; i++) {
-        n >>= NB;
+        n = Math.floor(n / 256);
         buff[islittle ? i : size - 1 - i] = n & MC;
     }
     if (neg && size > SZINT) {  /* negative number need sign extension? */
@@ -601,7 +808,7 @@ const str_pack = function(L) {
             case Kint: {  /* signed integers */
                 let n = luaL_checkinteger(L, arg);
                 if (size < SZINT) {  /* need overflow check? */
-                    let lim = 1 << (size * 8) - 1;
+                    let lim = 2 ** (size * NB - 1);
                     luaL_argcheck(L, -lim <= n && n < lim, arg, "integer overflow");
                 }
                 packint(b, n, h.islittle, size, n < 0);
@@ -610,8 +817,10 @@ const str_pack = function(L) {
             case Kuint: {  /* unsigned integers */
                 let n = luaL_checkinteger(L, arg);
                 if (size < SZINT)
-                    luaL_argcheck(L, (n>>>0) < (1 << (size * NB)), arg, "unsigned overflow");
-                packint(b, n>>>0, h.islittle, size, false);
+                    luaL_argcheck(L, n >= 0 && n < 2 ** (size * NB), arg, "unsigned overflow");
+                else
+                    luaL_argcheck(L, n >= 0, arg, "unsigned overflow");
+                packint(b, n, h.islittle, size, false);
                 break;
             }
             case Kfloat: {  /* floating-point options */
@@ -636,7 +845,7 @@ const str_pack = function(L) {
                 let s = luaL_checkstring(L, arg);
                 let len = s.length;
                 luaL_argcheck(L,
-                    size >= 4 /* sizeof(size_t) */ || len < (1 << (size * NB)),
+                    size >= SZINT || len < 2 ** (size * NB),
                     arg, "string length does not fit in given size");
                 packint(b, len, h.islittle, size, 0);  /* pack length */
                 luaL_addlstring(b, s, len);
@@ -786,18 +995,26 @@ const unpackint = function(L, str, islittle, size, issigned) {
     let res = 0;
     let limit = size <= SZINT ? size : SZINT;
     for (let i = limit - 1; i >= 0; i--) {
-        res <<= NB;
-        res |= str[islittle ? i : size - 1 - i];
+        res = res * 256;
+        res = res + str[islittle ? i : size - 1 - i];
     }
-    if (size < SZINT) {  /* real size smaller than lua_Integer? */
+    if (size <= SZINT) {  /* size fits lua_Integer? */
         if (issigned) {  /* needs sign extension? */
-            let mask = 1 << (size * NB - 1);
-            res = ((res ^ mask) - mask);  /* do sign extension */
+            let mask = 2 ** (size * NB - 1);
+            if (res >= mask) res -= mask * 2;
         }
     } else if (size > SZINT) {  /* must check unread bytes */
         let mask = !issigned || res >= 0 ? 0 : MC;
         for (let i = limit; i < size; i++) {
             if (str[islittle ? i : size - 1 - i] !== mask)
+                luaL_error(L, to_luastring("%d-byte integer does not fit into Lua Integer"), size);
+        }
+        /* also check that the accumulated value fits in lua_Integer */
+        if (issigned) {
+            if (res > LUA_MAXINTEGER || res < LUA_MININTEGER)
+                luaL_error(L, to_luastring("%d-byte integer does not fit into Lua Integer"), size);
+        } else {
+            if (res > LUA_MAXINTEGER)
                 luaL_error(L, to_luastring("%d-byte integer does not fit into Lua Integer"), size);
         }
     }

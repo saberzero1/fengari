@@ -66,7 +66,7 @@ const fengari_argcheck = function(c) {
 };
 
 const fengari_argcheckinteger = function(n) {
-    fengari_argcheck(typeof n === "number" && (n|0) === n);
+    fengari_argcheck(typeof n === "number" && Number.isSafeInteger(n));
 };
 
 const isvalid = function(o) {
@@ -1084,7 +1084,7 @@ const lua_upvalueid = function(L, fidx, n) {
         }
         case LUA_TCCL: {  /* C closure */
             let f = fi.value;
-            api_check(L, (n|0) === n && n > 0 && n <= f.nupvalues, "invalid upvalue index");
+            api_check(L, Number.isSafeInteger(n) && n > 0 && n <= f.nupvalues, "invalid upvalue index");
             return f.upvalue[n - 1];
         }
         default: {

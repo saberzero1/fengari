@@ -100,7 +100,20 @@ class BytecodeParser {
     LoadInteger() {
         if (luaZ_read(this.Z, this.u8, 0, this.integerSize) !== 0)
             this.error("truncated");
-        return this.dv.getInt32(0, true);
+        if (this.integerSize === 4)
+            return this.dv.getInt32(0, true);
+        if (this.integerSize === 8) {
+            let low = (this.u8[0] | (this.u8[1] << 8) | (this.u8[2] << 16) | (this.u8[3] << 24)) >>> 0;
+            let high = (this.u8[4] | (this.u8[5] << 8) | (this.u8[6] << 16) | (this.u8[7] << 24)) | 0;
+            return high * 2 ** 32 + low;
+        }
+        let res = 0;
+        for (let i = this.integerSize - 1; i >= 0; i--) {
+            res = res * 256 + this.u8[i];
+        }
+        let mask = 2 ** (this.integerSize * 8 - 1);
+        if (res >= mask) res -= mask * 2;
+        return res;
     }
 
     LoadSize_t() {
@@ -252,9 +265,9 @@ class BytecodeParser {
         this.numberSize      = this.LoadByte();
 
         this.checksize(this.intSize, 4, "int");
-        this.checksize(this.size_tSize, 4, "size_t");
+        this.checksize(this.size_tSize, 8, "size_t");
         this.checksize(this.instructionSize, 4, "instruction");
-        this.checksize(this.integerSize, 4, "integer");
+        this.checksize(this.integerSize, 8, "integer");
         this.checksize(this.numberSize, 8, "number");
 
         if (this.LoadInteger() !== 0x5678)
