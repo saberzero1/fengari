@@ -89,6 +89,17 @@ class global_State {
         this.version = null;
         this.tmname = new Array(ltm.TMS.TM_N);
         this.mt = new Array(LUA_NUMTAGS);
+
+        this.finalizerQueue = [];
+        this.finalizerTokens = new Set();
+        this.vmAlive = true;
+        this.draining = false;
+        this.finalizerRegistry = typeof FinalizationRegistry !== 'undefined'
+            ? new FinalizationRegistry((held) => {
+                if (!this.vmAlive) return;
+                this.finalizerQueue.push(held);
+            })
+            : null;
     }
 
 }
@@ -179,12 +190,51 @@ const lua_newstate = function() {
     return L;
 };
 
+const CIST_FIN = (1<<8);
+
+const drainFinalizers = function(L) {
+    let g = L.l_G;
+    if (!g.vmAlive || g.draining || g.finalizerQueue.length === 0) return;
+    g.draining = true;
+    try {
+        while (g.finalizerQueue.length > 0) {
+            let held = g.finalizerQueue.shift();
+            try {
+                let thread = lua_newthread(L);
+                thread.stack[thread.top] = held.gcFunc;
+                thread.top++;
+                thread.stack[thread.top] = new lobject.TValue(LUA_TNIL, null);
+                thread.top++;
+                let funcOff = thread.top - 2;
+                ldo.luaD_pcall(thread, function(T) {
+                    T.ci.callstatus |= CIST_FIN;
+                    ldo.luaD_callnoyield(T, funcOff, 0);
+                }, null, funcOff, 0);
+                luaE_freethread(L, thread);
+                L.top--;
+            } catch (e) {
+                /* swallow — PUC-Rio semantics */
+            }
+        }
+    } finally {
+        g.draining = false;
+    }
+};
+
 const close_state = function(L) {
     freestack(L);
 };
 
 const lua_close = function(L) {
-    L = L.l_G.mainthread;  /* only the main thread can be closed */
+    L = L.l_G.mainthread;
+    drainFinalizers(L);
+    L.l_G.vmAlive = false;
+    if (L.l_G.finalizerRegistry) {
+        for (let token of L.l_G.finalizerTokens) {
+            L.l_G.finalizerRegistry.unregister(token);
+        }
+        L.l_G.finalizerTokens.clear();
+    }
     close_state(L);
 };
 
@@ -206,3 +256,4 @@ module.exports.lua_newthread   = lua_newthread;
 module.exports.luaE_extendCI   = luaE_extendCI;
 module.exports.luaE_freeCI     = luaE_freeCI;
 module.exports.luaE_freethread = luaE_freethread;
+module.exports.drainFinalizers = drainFinalizers;

@@ -75,6 +75,7 @@ const {
     to_jsstring,
     to_luastring
 } = require("./fengaricore.js");
+const lstate = require('./lstate.js');
 
 let lua_writestring;
 let lua_writeline;
@@ -190,9 +191,28 @@ const opts = [
     "isrunning"
 ].map((e) => to_luastring(e));
 const luaB_collectgarbage = function(L) {
-    luaL_checkoption(L, 1, "collect", opts);
+    const o = luaL_checkoption(L, 1, "collect", opts);
     luaL_optinteger(L, 2, 0);
-    luaL_error(L, to_luastring("lua_gc not implemented"));
+    /* opts indices: 0=stop, 1=restart, 2=collect, 3=count, 4=step,
+       5=setpause, 6=setstepmul, 7=isrunning */
+    switch (o) {
+        case 2: /* "collect" */
+            if (L.l_G.finalizerQueue && L.l_G.finalizerQueue.length > 0) {
+                lstate.drainFinalizers(L);
+            }
+            lua_pushinteger(L, 0);
+            return 1;
+        case 3: /* "count" */
+            lua_pushinteger(L, 0);
+            lua_pushinteger(L, 0);
+            return 2;
+        case 7: /* "isrunning" */
+            lua_pushboolean(L, 0);
+            return 1;
+        default: /* "stop", "restart", "step", "setpause", "setstepmul" */
+            lua_pushinteger(L, 0);
+            return 1;
+    }
 };
 
 const luaB_type = function(L) {

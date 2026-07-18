@@ -407,7 +407,24 @@ const lua_setmetatable = function(L, objindex) {
     }
 
     switch (obj.ttnov()) {
-        case LUA_TUSERDATA:
+        case LUA_TUSERDATA: {
+            let udata = obj.value;
+            let g = L.l_G;
+            if (g.finalizerRegistry && g.finalizerTokens.has(udata)) {
+                g.finalizerRegistry.unregister(udata);
+                g.finalizerTokens.delete(udata);
+            }
+            udata.metatable = mt;
+            if (mt !== null && g.finalizerRegistry) {
+                let gcKey = g.tmname[ltm.TMS.TM_GC];
+                let gcFunc = ltable.luaH_getstr(mt, gcKey);
+                if (!gcFunc.ttisnil()) {
+                    g.finalizerRegistry.register(udata, { gcFunc: gcFunc }, udata);
+                    g.finalizerTokens.add(udata);
+                }
+            }
+            break;
+        }
         case LUA_TTABLE: {
             obj.value.metatable = mt;
             break;

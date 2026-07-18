@@ -674,6 +674,10 @@ const luaD_pcall = function(L, func, u, old_top, ef) {
 
     L.errfunc = old_errfunc;
 
+    if (L.nCcalls === 0 && L.l_G.finalizerQueue && L.l_G.finalizerQueue.length > 0) {
+        lstate.drainFinalizers(L);
+    }
+
     return status;
 };
 

@@ -139,6 +139,11 @@ None. This fork ships with zero runtime dependencies.
 | `string.packsize("j")` | 4 | 8 |
 | `string.format` | Via `sprintf-js` npm package | Custom `luaSprintf` (zero dependencies) |
 | Bitwise operations | 32-bit | 32-bit (unchanged) |
+| `collectgarbage("count")` | Returns allocated memory in KB (two values) | Returns `0, 0` (no memory tracking) |
+| `collectgarbage("collect")` | Full GC cycle | Drains `__gc` finalizer queue |
+| `collectgarbage("isrunning")` | GC running state | Always `false` |
+| Other `collectgarbage` modes | GC tuning | No-op, returns `0` |
+| `__gc` metamethods | Called synchronously by GC on userdata | Called via `FinalizationRegistry` + explicit drain (non-deterministic timing; userdata only) |
 
 ## Coroutine↔Promise bridge validation
 
@@ -191,9 +196,13 @@ Upstream fengari uses 32-bit integers (`LUA_INT_TYPE=LUA_INT_LONG` equivalent). 
 
 These are upstream fengari limitations that this fork does not attempt to address:
 
-- `__gc` metamethods don't work (no custom GC; relies on JavaScript garbage collector)
 - Weak tables (`__mode`) are not supported
-- `lua_gc` / `collectgarbage` are not implemented
+- `lua_gc` is not implemented (but `collectgarbage` Lua function works — see behavioral differences)
+
+Previously inherited, now addressed by this fork:
+
+- `__gc` metamethods: implemented via `FinalizationRegistry` for userdata (not tables). Finalizers fire on explicit drain (`collectgarbage("collect")`, `lua_close`, or outermost `luaD_pcall` return). Timing is non-deterministic. Finalization order is unspecified.
+- `collectgarbage`: all modes return safe values instead of erroring. `"count"` returns `0, 0` (no memory tracking). `"collect"` drains the finalizer queue.
 
 ## Upstream sync policy
 
